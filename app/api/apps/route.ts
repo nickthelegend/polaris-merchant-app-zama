@@ -27,6 +27,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ apps });
 }
 
+export async function OPTIONS() {
+    return new NextResponse(null, {
+        status: 200,
+        headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, x-wallet-address',
+        },
+    });
+}
+
+
 export async function POST(req: NextRequest) {
     try {
         const { wallet_address, name, category } = await req.json();
