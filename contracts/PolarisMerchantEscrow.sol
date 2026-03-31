@@ -76,4 +76,20 @@ contract PolarisMerchantEscrow {
 
         emit FundsWithdrawn(owner, balance, block.timestamp);
     }
+
+    /**
+     * @dev Withdraw funds from the MerchantRouter that are credited to this escrow contract.
+     * @param router The address of the MerchantRouter contract.
+     * @param amount The amount to withdraw.
+     * @param destChainId The destination chain ID (usually current chain).
+     */
+    function withdrawFromRouter(address router, uint256 amount, uint64 destChainId) external {
+        require(msg.sender == owner, "Only owner");
+        
+        // Call merchantWithdraw(address token, uint256 amount, uint64 destChainId) on router
+        (bool success, ) = router.call(
+            abi.encodeWithSignature("merchantWithdraw(address,uint256,uint64)", stablecoin, amount, destChainId)
+        );
+        require(success, "Router withdrawal failed");
+    }
 }
