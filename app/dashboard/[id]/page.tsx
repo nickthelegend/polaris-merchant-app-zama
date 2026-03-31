@@ -27,7 +27,7 @@ import WebhookManager from '@/components/WebhookManager';
 import { CONTRACTS } from '@/lib/constants';
 
 const MERCHANT_ROUTER_ABI = [
-    "function merchantWithdraw(address token) external",
+    "function merchantWithdraw(address token, uint256 amount, uint64 destChainId) external",
     "function merchantBalances(address merchant, address token) view returns (uint256)"
 ];
 
@@ -158,7 +158,15 @@ export default function AppDetails() {
             const signer = await provider.getSigner();
             const router = new ethers.Contract(CONTRACTS.MASTER.MERCHANT_ROUTER, MERCHANT_ROUTER_ABI, signer);
 
-            const tx = await router.merchantWithdraw(DEFAULT_STABLECOIN);
+            // Get the merchant's balance first
+            const signerAddress = await signer.getAddress();
+            const balance = await router.merchantBalances(signerAddress, DEFAULT_STABLECOIN);
+            if (balance === 0n) {
+                setError('No funds available for withdrawal');
+                return;
+            }
+
+            const tx = await router.merchantWithdraw(DEFAULT_STABLECOIN, balance, 11155111);
             setStatusText('Withdrawing from MerchantRouter...');
             await tx.wait();
 
