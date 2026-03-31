@@ -44,18 +44,32 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'User not registered. Please refresh.' }, { status: 404 });
         }
 
-        // 2. Create App with explicitly generated credentials
-        const client_id = `prod_${crypto.randomBytes(12).toString('hex')}`;
+        // 2. Check for duplicate app name per wallet
+        const existingApp = await db.collection('merchant_apps').findOne({
+            user_id: wallet_address,
+            name
+        });
+
+        if (existingApp) {
+            return NextResponse.json(
+                { error: 'An app with this name already exists for your wallet' },
+                { status: 409 }
+            );
+        }
+
+        // 3. Create App with unique credentials (crypto.randomUUID for client_id, randomBytes for secret)
+        const client_id = `prod_${crypto.randomUUID().replace(/-/g, '')}`;
         const client_secret = `sk_${crypto.randomBytes(24).toString('hex')}`;
 
         const newApp = {
             user_id: wallet_address,
+            wallet_address,
             name,
-            category,
+            category: category || '',
             client_id,
             client_secret,
             network: 'sepolia',
-            status: 'pending',
+            status: 'active',
             created_at: new Date(),
             updated_at: new Date()
         };

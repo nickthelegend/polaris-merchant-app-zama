@@ -56,15 +56,18 @@ export default function Dashboard() {
                 })
             });
 
-            if (!res.ok) throw new Error('Failed to create app');
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || 'Failed to create app');
+            }
 
             mutate('/api/apps'); // Refresh list
             setNewAppName('');
             setNewAppCategory('');
             // Close modal if we had one, for now just inline form reset
-        } catch (err) {
+        } catch (err: any) {
             console.error(err);
-            alert('Failed to create application');
+            alert(err.message || 'Failed to create application');
         } finally {
             setIsCreating(false);
         }

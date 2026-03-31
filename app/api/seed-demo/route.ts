@@ -21,6 +21,7 @@ export async function GET() {
 
         const newApp = {
             user_id: wallet,
+            wallet_address: wallet,
             name: 'Polaris Demo Shop',
             category: 'E-commerce',
             client_id,

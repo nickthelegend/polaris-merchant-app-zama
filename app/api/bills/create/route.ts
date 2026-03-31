@@ -38,11 +38,11 @@ export async function POST(req: Request) {
     created_at: new Date(),
   });
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const coreUrl = process.env.POLARIS_CORE_URL || "http://localhost:3000";
   return NextResponse.json({
     billId: result.insertedId,
     billHash,
-    checkoutUrl: `${baseUrl}/pay/${billHash}`,
+    checkoutUrl: `${coreUrl}/pay/${billHash}`,
     merchantName: app.name,
     escrowAddress: app.escrow_contract,
     chainId: 11155111, // Sepolia

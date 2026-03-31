@@ -11,12 +11,13 @@ export interface MerchantUser {
 export interface MerchantApp {
   _id?: ObjectId;
   user_id: string; // Refers to MerchantUser._id or wallet_address
+  wallet_address: string;
   name: string;
   category: string;
   client_id: string;
   client_secret: string;
   network: string;
-  status: string;
+  status: "active" | "inactive";
   escrow_contract?: string;
   created_at: Date;
   updated_at: Date;

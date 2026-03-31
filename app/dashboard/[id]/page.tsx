@@ -17,11 +17,19 @@ import {
     AlertCircle,
     Loader2,
     RefreshCw,
-    Globe
+    Globe,
+    Receipt,
+    Wallet
 } from 'lucide-react';
 import { ethers } from 'ethers';
 import PolarisMerchantEscrow from '@/lib/artifacts/contracts/PolarisMerchantEscrow.sol/PolarisMerchantEscrow.json';
 import WebhookManager from '@/components/WebhookManager';
+import { CONTRACTS } from '@/lib/constants';
+
+const MERCHANT_ROUTER_ABI = [
+    "function merchantWithdraw(address token) external",
+    "function merchantBalances(address merchant, address token) view returns (uint256)"
+];
 
 // Mock USDC on Sepolia
 const DEFAULT_STABLECOIN = "0x1083D49aAB56502D4f4E24fFf52ce622D9B6eCd0";
@@ -40,6 +48,8 @@ export default function AppDetails() {
     const [refreshingLogs, setRefreshingLogs] = useState(false);
     const [withdrawing, setWithdrawing] = useState(false);
     const [balance, setBalance] = useState('0.00');
+    const [routerWithdrawing, setRouterWithdrawing] = useState(false);
+    const [routerBalance, setRouterBalance] = useState('0.00');
 
     const { data, error: fetchError, mutate } = useSWR(
         authenticated && user?.wallet?.address ? `/api/apps/${id}` : null,
@@ -51,7 +61,18 @@ export default function AppDetails() {
         }
     );
 
+    const { data: txData, mutate: mutateTx } = useSWR(
+        authenticated && user?.wallet?.address ? `/api/apps/${id}/transactions` : null,
+        async (url) => {
+            const res = await fetch(url, {
+                headers: { 'x-wallet-address': user?.wallet?.address || '' }
+            });
+            return res.json();
+        }
+    );
+
     const app = data?.app;
+    const transactions: any[] = txData?.transactions || [];
 
     const fetchBalance = async () => {
         if (!app?.escrow_contract || !wallet) return;
@@ -105,6 +126,52 @@ export default function AppDetails() {
             return () => clearInterval(int);
         }
     }, [app?.escrow_contract]);
+
+    const fetchRouterBalance = async () => {
+        if (!wallet || !user?.wallet?.address) return;
+        try {
+            const externalProvider = await wallet.getEthereumProvider();
+            const provider = new ethers.BrowserProvider(externalProvider);
+            const router = new ethers.Contract(CONTRACTS.MASTER.MERCHANT_ROUTER, MERCHANT_ROUTER_ABI, provider);
+            const bal = await router.merchantBalances(user.wallet.address, DEFAULT_STABLECOIN);
+            setRouterBalance(ethers.formatUnits(bal, 18));
+        } catch (e) {
+            console.error('Failed to fetch router balance:', e);
+        }
+    };
+
+    useEffect(() => {
+        if (wallet && user?.wallet?.address) {
+            fetchRouterBalance();
+            const int = setInterval(fetchRouterBalance, 15000);
+            return () => clearInterval(int);
+        }
+    }, [wallet, user?.wallet?.address]);
+
+    const handleRouterWithdraw = async () => {
+        if (!wallet) return;
+        setRouterWithdrawing(true);
+        setError('');
+        try {
+            const externalProvider = await wallet.getEthereumProvider();
+            const provider = new ethers.BrowserProvider(externalProvider);
+            const signer = await provider.getSigner();
+            const router = new ethers.Contract(CONTRACTS.MASTER.MERCHANT_ROUTER, MERCHANT_ROUTER_ABI, signer);
+
+            const tx = await router.merchantWithdraw(DEFAULT_STABLECOIN);
+            setStatusText('Withdrawing from MerchantRouter...');
+            await tx.wait();
+
+            fetchRouterBalance();
+            setStatusText('Router withdrawal successful!');
+            setTimeout(() => setStatusText(''), 3000);
+        } catch (e: any) {
+            console.error(e);
+            setError(e.message || 'Router withdrawal failed');
+        } finally {
+            setRouterWithdrawing(false);
+        }
+    };
 
     const handleWithdraw = async () => {
         if (!wallet || !app?.escrow_contract) return;
@@ -372,6 +439,65 @@ window.location.href = checkoutUrl;`}
                     </section>
 
                     <WebhookManager appId={id as string} />
+
+                    {/* Bill Transactions Section */}
+                    <section className="bg-white/[0.03] border border-white/10 rounded-2xl p-6">
+                        <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center gap-2">
+                                <Receipt className="w-5 h-5 text-primary" />
+                                <h2 className="text-lg font-bold">Bill Transactions</h2>
+                            </div>
+                            <button
+                                onClick={() => mutateTx()}
+                                className="p-2 hover:bg-white/5 rounded-lg transition-colors"
+                            >
+                                <RefreshCw className="w-4 h-4 text-white/30" />
+                            </button>
+                        </div>
+
+                        {transactions.length === 0 ? (
+                            <div className="bg-black/20 border border-dashed border-white/10 rounded-xl p-12 text-center">
+                                <p className="text-xs text-white/20 uppercase tracking-widest">No bill transactions yet</p>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left">
+                                    <thead>
+                                        <tr className="border-b border-white/10">
+                                            <th className="text-[10px] uppercase text-white/40 font-bold pb-3 pr-4">Amount</th>
+                                            <th className="text-[10px] uppercase text-white/40 font-bold pb-3 pr-4">Asset</th>
+                                            <th className="text-[10px] uppercase text-white/40 font-bold pb-3 pr-4">Status</th>
+                                            <th className="text-[10px] uppercase text-white/40 font-bold pb-3 pr-4">Payment Mode</th>
+                                            <th className="text-[10px] uppercase text-white/40 font-bold pb-3">Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {transactions.map((tx: any) => (
+                                            <tr key={tx._id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                                                <td className="py-3 pr-4 text-sm font-bold text-white">{tx.amount} {tx.asset}</td>
+                                                <td className="py-3 pr-4 text-xs text-white/60">{tx.asset}</td>
+                                                <td className="py-3 pr-4">
+                                                    <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
+                                                        tx.status === 'paid'
+                                                            ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                                                            : 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20'
+                                                    }`}>
+                                                        {tx.status}
+                                                    </span>
+                                                </td>
+                                                <td className="py-3 pr-4 text-xs text-white/60">{tx.payment_mode || '—'}</td>
+                                                <td className="py-3 text-xs text-white/40">
+                                                    {tx.paid_at
+                                                        ? new Date(tx.paid_at).toLocaleDateString()
+                                                        : new Date(tx.created_at).toLocaleDateString()}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </section>
                 </div>
 
                 {/* Right Column: Escrow Deployment */}
@@ -468,6 +594,38 @@ window.location.href = checkoutUrl;`}
                                 <span className="text-white/60 font-bold">11155111</span>
                             </div>
                         </div>
+                    </section>
+
+                    {/* MerchantRouter Withdrawal */}
+                    <section className="bg-white/[0.03] border border-white/10 rounded-2xl p-6 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-teal-500/10 blur-3xl -mr-12 -mt-12" />
+
+                        <div className="flex items-center gap-2 mb-4">
+                            <Wallet className="w-5 h-5 text-primary" />
+                            <h2 className="text-lg font-bold">Credit Settlement</h2>
+                        </div>
+
+                        <p className="text-[10px] text-white/40 mb-4 leading-relaxed">
+                            Withdraw funds received via BNPL and Split-in-3 payments through the MerchantRouter contract.
+                        </p>
+
+                        <div className="bg-primary/5 border border-primary/10 rounded-xl p-4 flex items-center justify-between mb-3">
+                            <div>
+                                <div className="text-[9px] uppercase font-bold text-primary/50 mb-1">Router Balance</div>
+                                <div className="text-xl font-bold text-white">{routerBalance} USDC</div>
+                            </div>
+                            <button
+                                disabled={routerWithdrawing || parseFloat(routerBalance) === 0}
+                                onClick={handleRouterWithdraw}
+                                className="bg-primary text-black px-4 py-2 rounded-lg font-black text-[10px] uppercase tracking-tighter hover:scale-105 disabled:opacity-30 transition-all flex items-center gap-2 shadow-md shadow-primary/10"
+                            >
+                                {routerWithdrawing ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Withdraw'}
+                            </button>
+                        </div>
+
+                        {parseFloat(routerBalance) === 0 && (
+                            <p className="text-[10px] text-white/20 italic text-center">No funds available for withdrawal</p>
+                        )}
                     </section>
                 </div>
             </main>
