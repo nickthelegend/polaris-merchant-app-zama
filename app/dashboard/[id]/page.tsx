@@ -50,6 +50,40 @@ export default function AppDetails() {
     const [balance, setBalance] = useState('0.00');
     const [routerWithdrawing, setRouterWithdrawing] = useState(false);
     const [routerBalance, setRouterBalance] = useState('0.00');
+    const [currentChainId, setCurrentChainId] = useState<number | null>(null);
+
+    // Track current chain
+    useEffect(() => {
+        const checkChain = async () => {
+            if (!wallet) return;
+            try {
+                const provider = await wallet.getEthereumProvider();
+                const chainId = await provider.request({ method: 'eth_chainId' });
+                setCurrentChainId(parseInt(chainId as string, 16));
+            } catch (e) { }
+        };
+        checkChain();
+        // Listen for chain changes
+        if (wallet) {
+            wallet.getEthereumProvider().then((provider: any) => {
+                provider.on?.('chainChanged', (chainId: string) => {
+                    setCurrentChainId(parseInt(chainId, 16));
+                });
+            }).catch(() => { });
+        }
+    }, [wallet]);
+
+    const switchToSepolia = async () => {
+        if (!wallet) return;
+        try {
+            await wallet.switchChain(11155111);
+            setCurrentChainId(11155111);
+        } catch (e: any) {
+            setError('Failed to switch network. Please switch manually in your wallet.');
+        }
+    };
+
+    const isOnSepolia = currentChainId === 11155111;
 
     const { data, error: fetchError, mutate } = useSWR(
         authenticated && user?.wallet?.address ? `/api/apps/${id}` : null,
@@ -161,7 +195,7 @@ export default function AppDetails() {
             // Get the merchant's balance first
             const signerAddress = await signer.getAddress();
             const balance = await router.merchantBalances(signerAddress, DEFAULT_STABLECOIN);
-            if (balance === 0n) {
+            if (balance === BigInt(0)) {
                 setError('No funds available for withdrawal');
                 return;
             }
@@ -209,15 +243,24 @@ export default function AppDetails() {
     const handleDeployEscrow = async () => {
         if (!wallet) return;
         setDeploying(true);
-        setStatusText('Requesting signature...');
+        setStatusText('Switching to Sepolia...');
         setError('');
 
         try {
+            // Force switch to Sepolia before deploying
+            await wallet.switchChain(11155111);
+
             const externalProvider = await wallet.getEthereumProvider();
             const provider = new ethers.BrowserProvider(externalProvider);
             const signer = await provider.getSigner();
 
-            setStatusText('Deploying Escrow Contract...');
+            // Verify we're on Sepolia
+            const network = await provider.getNetwork();
+            if (Number(network.chainId) !== 11155111) {
+                throw new Error('Please switch to Sepolia network in your wallet');
+            }
+
+            setStatusText('Deploying Escrow Contract on Sepolia...');
             const factory = new ethers.ContractFactory(
                 PolarisMerchantEscrow.abi,
                 PolarisMerchantEscrow.bytecode,
@@ -322,6 +365,36 @@ export default function AppDetails() {
                     </div>
                 </div>
             </header>
+
+            {/* Sepolia Network Banner */}
+            {currentChainId !== null && !isOnSepolia && (
+                <div className="max-w-4xl mx-auto mb-6">
+                    <div className="flex items-center justify-between bg-red-500/10 border border-red-500/30 rounded-xl px-5 py-3">
+                        <div className="flex items-center gap-3">
+                            <AlertCircle className="w-5 h-5 text-red-400" />
+                            <div>
+                                <p className="text-sm font-bold text-red-400">Wrong Network</p>
+                                <p className="text-[10px] text-red-400/60">You are on chain {currentChainId}. Polaris requires Sepolia (11155111).</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={switchToSepolia}
+                            className="bg-primary text-black px-5 py-2 rounded-lg font-black text-[10px] uppercase tracking-tighter hover:scale-105 transition-all shadow-md shadow-primary/20"
+                        >
+                            Switch to Sepolia
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {currentChainId !== null && isOnSepolia && (
+                <div className="max-w-4xl mx-auto mb-6">
+                    <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-xl px-5 py-2">
+                        <CheckCircle2 className="w-4 h-4 text-green-400" />
+                        <p className="text-[10px] text-green-400 font-bold uppercase tracking-wider">Connected to Ethereum Sepolia</p>
+                    </div>
+                </div>
+            )}
 
             <main className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
                 {/* Left Column: API Keys */}
