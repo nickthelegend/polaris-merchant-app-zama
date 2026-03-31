@@ -109,25 +109,23 @@ export default function AppDetails() {
     const transactions: any[] = txData?.transactions || [];
 
     const fetchBalance = async () => {
-        if (!app?.escrow_contract || !wallet) return;
+        if (!app?.escrow_contract) return;
         try {
-            const externalProvider = await wallet.getEthereumProvider();
-            const provider = new ethers.BrowserProvider(externalProvider);
+            const provider = new ethers.JsonRpcProvider('https://1rpc.io/sepolia');
             const abi = ["function balanceOf(address) view returns (uint256)"];
             const usdc = new ethers.Contract(DEFAULT_STABLECOIN, abi, provider);
             const bal = await usdc.balanceOf(app.escrow_contract);
-            setBalance(ethers.formatUnits(bal, 18));
+            setBalance(ethers.formatUnits(bal, 6));
         } catch (e) {
             console.error('Failed to fetch balance:', e);
         }
     };
 
     const fetchLogs = async () => {
-        if (!app?.escrow_contract || !wallet) return;
+        if (!app?.escrow_contract) return;
         setRefreshingLogs(true);
         try {
-            const externalProvider = await wallet.getEthereumProvider();
-            const provider = new ethers.BrowserProvider(externalProvider);
+            const provider = new ethers.JsonRpcProvider('https://1rpc.io/sepolia');
             const contract = new ethers.Contract(app.escrow_contract, PolarisMerchantEscrow.abi, provider);
 
             const filter = contract.filters.PaymentSettled();
@@ -162,25 +160,49 @@ export default function AppDetails() {
     }, [app?.escrow_contract]);
 
     const fetchRouterBalance = async () => {
-        if (!wallet || !user?.wallet?.address) return;
+        if (!user?.wallet?.address) return;
         try {
-            const externalProvider = await wallet.getEthereumProvider();
-            const provider = new ethers.BrowserProvider(externalProvider);
+            // Use direct Sepolia RPC — no wallet provider needed for reads
+            const provider = new ethers.JsonRpcProvider('https://1rpc.io/sepolia');
             const router = new ethers.Contract(CONTRACTS.MASTER.MERCHANT_ROUTER, MERCHANT_ROUTER_ABI, provider);
-            const bal = await router.merchantBalances(user.wallet.address, DEFAULT_STABLECOIN);
-            setRouterBalance(ethers.formatUnits(bal, 18));
+
+            let totalBal = BigInt(0);
+
+            // Check balance on merchant's Privy wallet
+            try {
+                const walletBal = await router.merchantBalances(user.wallet.address, DEFAULT_STABLECOIN);
+                totalBal += walletBal;
+            } catch {}
+
+            // Check balance on escrow contract address
+            if (app?.escrow_contract && app.escrow_contract !== '0x0000000000000000000000000000000000000000') {
+                try {
+                    const escrowBal = await router.merchantBalances(app.escrow_contract, DEFAULT_STABLECOIN);
+                    totalBal += escrowBal;
+                } catch {}
+            }
+
+            // Also check the wallet_address stored on the app record
+            if (app?.wallet_address && app.wallet_address.toLowerCase() !== (user.wallet.address || '').toLowerCase()) {
+                try {
+                    const appWalletBal = await router.merchantBalances(app.wallet_address, DEFAULT_STABLECOIN);
+                    totalBal += appWalletBal;
+                } catch {}
+            }
+
+            setRouterBalance(ethers.formatUnits(totalBal, 6));
         } catch (e) {
             console.error('Failed to fetch router balance:', e);
         }
     };
 
     useEffect(() => {
-        if (wallet && user?.wallet?.address) {
+        if (user?.wallet?.address && app) {
             fetchRouterBalance();
             const int = setInterval(fetchRouterBalance, 15000);
             return () => clearInterval(int);
         }
-    }, [wallet, user?.wallet?.address]);
+    }, [user?.wallet?.address, app]);
 
     const handleRouterWithdraw = async () => {
         if (!wallet) return;

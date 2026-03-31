@@ -1,69 +1,36 @@
-import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/mongodb';
+import { NextResponse } from "next/server";
+import { getDb } from "@/lib/mongodb";
 
 export async function POST(req: Request) {
-    const clientId = req.headers.get('x-client-id');
-    const clientSecret = req.headers.get('x-client-secret');
+  const body = await req.json().catch(() => ({}));
+  const { billHash, txHash, userAddress, paymentMode, loanId } = body;
 
-    if (!clientId || !clientSecret) {
-        return NextResponse.json(
-            { error: 'Missing Client Auth Headers (x-client-id, x-client-secret)' },
-            { status: 401 }
-        );
-    }
+  if (!billHash) {
+    return NextResponse.json({ error: "Missing billHash" }, { status: 400 });
+  }
 
-    const body = await req.json().catch(() => ({}));
-    const { billHash, payment_mode, loan_id, tx_hash } = body;
-
-    if (!billHash) {
-        return NextResponse.json({ error: 'billHash is required' }, { status: 400 });
-    }
-
+  try {
     const db = await getDb();
-
-    // Verify API credentials
-    const app = await db.collection('merchant_apps').findOne({
-        client_id: clientId,
-        client_secret: clientSecret,
-    });
-
-    if (!app) {
-        return NextResponse.json({ error: 'Invalid API Credentials' }, { status: 403 });
-    }
-
-    // Find the bill
-    const bill = await db.collection('merchant_bills').findOne({
-        hash: billHash,
-        app_id: app._id,
-    });
-
-    if (!bill) {
-        return NextResponse.json({ error: 'Bill not found' }, { status: 404 });
-    }
-
-    // If already paid, return success without modifying
-    if (bill.status === 'paid') {
-        return NextResponse.json({ bill });
-    }
-
-    // Transition from pending to paid
-    const updated = await db.collection('merchant_bills').findOneAndUpdate(
-        { _id: bill._id, status: 'pending' },
-        {
-            $set: {
-                status: 'paid',
-                payment_mode: payment_mode || null,
-                loan_id: loan_id || null,
-                tx_hash: tx_hash || null,
-                paid_at: new Date(),
-            },
+    const result = await db.collection("merchant_bills").updateOne(
+      { hash: billHash, status: "pending" },
+      {
+        $set: {
+          status: "paid",
+          payment_mode: paymentMode || "bnpl",
+          loan_id: loanId,
+          tx_hash: txHash,
+          paid_at: new Date(),
+          paid_by: userAddress,
         },
-        { returnDocument: 'after' }
+      }
     );
 
-    if (!updated) {
-        return NextResponse.json({ error: 'Failed to update bill status' }, { status: 500 });
-    }
-
-    return NextResponse.json({ bill: updated });
+    return NextResponse.json({
+      success: true,
+      updated: result.modifiedCount > 0,
+    });
+  } catch (e: any) {
+    console.error("Bill Pay Error:", e);
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
 }
